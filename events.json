@@ -1,0 +1,18 @@
+[
+	{ "on": "click", "action": "laugh" },
+	{ "on": "doubleClick", "action": "hide" },
+	{
+		"on": "hover",
+		"action": "say",
+		"lines": ["Hi!", "Hey there", "Hello!", "What's up?", "Boop!"]
+	},
+	{ "on": "pet", "action": "happy" },
+	{ "on": "rightClick", "action": "menu" },
+	{ "on": "longPress", "action": "avatars" },
+	{ "on": "mouseDown" },
+	{ "on": "mouseUp" },
+	{ "on": "mouseLeave" },
+	{ "on": "middleClick", "command": "wt.exe"  },
+	{ "on": "wheelUp" },
+	{ "on": "wheelDown" }
+]
