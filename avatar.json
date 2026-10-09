@@ -1,7 +1,7 @@
 {
   "mode": "3d",
-  "model": "3d avatars/fish.glb",
-  "yawOffset": 90,
-  "turn": 180,
+  "model": "3d avatars/robot.glb",
+  "yawOffset": 360,
+  "turn": 270,
   "scale": 0.5
 }

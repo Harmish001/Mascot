@@ -9,7 +9,6 @@ using System.Runtime.InteropServices;
 using System.Threading;
 using System.Web.Script.Serialization;
 using System.Windows.Forms;
-using Microsoft.Win32;
 
 // ponytail: native GL, not WebView. This GLB is one static mesh, so walk/jump/float
 // are body motion. A clip player belongs here only after the file grows a skeleton.
@@ -32,6 +31,12 @@ namespace Mascot
                 int skin = Skin.SelfCheck();
                 if (skin != 0)
                     return skin;
+                int clocks = TimerPlan.SelfCheck();
+                if (clocks != 0)
+                    return clocks;
+                int pixels = Pixels.SelfCheck();
+                if (pixels != 0)
+                    return pixels;
                 try
                 {
                     return GlbMesh.SelfCheck(AvatarConfig.Load().ModelPath);
@@ -334,6 +339,7 @@ namespace Mascot
         public static string CommandsText()
         {
             return "[\r\n"
+                + "  { \"label\": \"Timers\", \"action\": \"timers\" },\r\n"
                 + "  { \"label\": \"Notepad\", \"command\": \"notepad.exe\" }\r\n"
                 + "]\r\n";
         }
@@ -403,27 +409,100 @@ namespace Mascot
         }
     }
 
+    static class Pixels
+    {
+        public static bool Bounds(byte[] alpha, int w, int h, out int left, out int top, out int right, out int bottom)
+        {
+            left = w;
+            top = h;
+            right = 0;
+            bottom = 0;
+            if (alpha == null || w < 1 || h < 1 || alpha.Length < w * h)
+                return false;
+            for (int y = 0; y < h; y++)
+            {
+                int row = y * w;
+                for (int x = 0; x < w; x++)
+                {
+                    if (alpha[row + x] < 16)
+                        continue;
+                    if (x < left) left = x;
+                    if (y < top) top = y;
+                    if (x + 1 > right) right = x + 1;
+                    if (y + 1 > bottom) bottom = y + 1;
+                }
+            }
+            return right > left && bottom > top;
+        }
+
+        public static int SelfCheck()
+        {
+            byte[] a = new byte[12];
+            a[1 * 4 + 2] = 200;
+            int l, t, r, b;
+            if (!Bounds(a, 4, 3, out l, out t, out r, out b) || l != 2 || t != 1 || r != 3 || b != 2)
+            {
+                Console.Error.WriteLine("pixel bounds");
+                return 40;
+            }
+            a[1 * 4 + 2] = 10;
+            if (Bounds(a, 4, 3, out l, out t, out r, out b))
+            {
+                Console.Error.WriteLine("faint pixel");
+                return 41;
+            }
+            return 0;
+        }
+    }
+
     sealed class Skin
     {
         public Color HoverBg = Color.FromArgb(255, 32, 36, 46);
         public Color HoverFg = Color.White;
         public Color HoverBorder = Color.FromArgb(255, 90, 164, 232);
+        public float HoverBorderW = 1.4f;
         public float HoverFont = 9.5f;
         public int HoverRadius = 8;
+        public int HoverPadL = 11, HoverPadT = 8, HoverPadR = 11, HoverPadB = 6;
         public Color MenuBg = Color.FromArgb(255, 28, 32, 42);
         public Color MenuFg = Color.FromArgb(255, 236, 240, 246);
-        public Color MenuBorder = Color.FromArgb(255, 86, 156, 224);
+        public Color MenuBorder = Color.FromArgb(255, 255, 255, 255);
+        public float MenuBorderW = 1f;
         public Color MenuHover = Color.FromArgb(255, 48, 118, 196);
         public float MenuFont = 10f;
         public int MenuRadius = 8;
         public int PadL = 12, PadT = 4, PadR = 14, PadB = 4;
+        public Color ClockBg = Color.FromArgb(7, 16, 22);
+        public Color ClockFg = Color.FromArgb(230, 252, 252);
+        public Color ClockBorder = Color.FromArgb(92, 232, 240);
+        public float ClockFont = 18f;
+        public int ClockRadius = 2;
+        public float ClockBorderW = 1.6f;
+        public int ClockPadL = 6, ClockPadT = 2, ClockPadR = 6, ClockPadB = 2;
+        public Color RemindBg = Color.FromArgb(42, 26, 12);
+        public Color RemindFg = Color.FromArgb(255, 196, 110);
+        public Color RemindBorder = Color.FromArgb(255, 176, 72);
+        public float RemindFont = 11f;
+        public int RemindRadius = 2;
+        public float RemindBorderW = 1.6f;
+        public int RemindPadL = 8, RemindPadT = 3, RemindPadR = 8, RemindPadB = 3;
+        public Color TimerBg = Color.FromArgb(7, 16, 22);
+        public Color TimerFg = Color.FromArgb(214, 246, 248);
+        public Color TimerBorder = Color.FromArgb(92, 232, 240);
+        public Color TimerMuted = Color.FromArgb(118, 168, 176);
+        public Color TimerButton = Color.FromArgb(16, 86, 98);
+        public Color TimerAlert = Color.FromArgb(255, 176, 72);
+        public float TimerFont = 11f;
+        public float TimerBorderW = 2f;
+        public int TimerRadius = 2;
+        public int TimerPadL = 16, TimerPadT = 14, TimerPadR = 16, TimerPadB = 14;
 
         public static Skin Load()
         {
             Skin s = new Skin();
             string path = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "style.css");
             if (!File.Exists(path))
-                File.WriteAllText(path, DefaultText());
+                return s;
             try
             {
                 Apply(s, File.ReadAllText(path));
@@ -456,6 +535,12 @@ namespace Mascot
                         SetHover(s, key, val);
                     else if (sel == "menu")
                         SetMenu(s, key, val);
+                    else if (sel == "clock")
+                        SetClock(s, key, val);
+                    else if (sel == "reminder")
+                        SetRemind(s, key, val);
+                    else if (sel == "timer")
+                        SetTimer(s, key, val);
                 }
             }
         }
@@ -464,16 +549,22 @@ namespace Mascot
         {
             if (key == "background") s.HoverBg = ColorOf(val, s.HoverBg);
             else if (key == "color") s.HoverFg = ColorOf(val, s.HoverFg);
-            else if (key == "border" || key == "border-color") s.HoverBorder = ColorOf(val, s.HoverBorder);
+            else if (key == "border" || key == "border-color") ReadBorder(val, ref s.HoverBorder, ref s.HoverBorderW);
             else if (key == "font-size") s.HoverFont = SizeOf(val, s.HoverFont);
             else if (key == "radius" || key == "border-radius") s.HoverRadius = (int)SizeOf(val, s.HoverRadius);
+            else if (key == "padding")
+            {
+                int l, t, r, b;
+                PadOf(val, s.HoverPadL, s.HoverPadT, s.HoverPadR, s.HoverPadB, out l, out t, out r, out b);
+                s.HoverPadL = l; s.HoverPadT = t; s.HoverPadR = r; s.HoverPadB = b;
+            }
         }
 
         static void SetMenu(Skin s, string key, string val)
         {
             if (key == "background") s.MenuBg = ColorOf(val, s.MenuBg);
             else if (key == "color") s.MenuFg = ColorOf(val, s.MenuFg);
-            else if (key == "border" || key == "border-color") s.MenuBorder = ColorOf(val, s.MenuBorder);
+            else if (key == "border" || key == "border-color") ReadBorder(val, ref s.MenuBorder, ref s.MenuBorderW);
             else if (key == "hover" || key == "background-hover") s.MenuHover = ColorOf(val, s.MenuHover);
             else if (key == "font-size") s.MenuFont = SizeOf(val, s.MenuFont);
             else if (key == "radius" || key == "border-radius") s.MenuRadius = (int)SizeOf(val, s.MenuRadius);
@@ -482,6 +573,54 @@ namespace Mascot
                 int l, t, r, b;
                 PadOf(val, s.PadL, s.PadT, s.PadR, s.PadB, out l, out t, out r, out b);
                 s.PadL = l; s.PadT = t; s.PadR = r; s.PadB = b;
+            }
+        }
+
+        static void SetClock(Skin s, string key, string val)
+        {
+            if (key == "background") s.ClockBg = ColorOf(val, s.ClockBg);
+            else if (key == "color") s.ClockFg = ColorOf(val, s.ClockFg);
+            else if (key == "border" || key == "border-color") ReadBorder(val, ref s.ClockBorder, ref s.ClockBorderW);
+            else if (key == "font-size") s.ClockFont = SizeOf(val, s.ClockFont);
+            else if (key == "radius" || key == "border-radius") s.ClockRadius = (int)SizeOf(val, s.ClockRadius);
+            else if (key == "padding")
+            {
+                int l, t, r, b;
+                PadOf(val, s.ClockPadL, s.ClockPadT, s.ClockPadR, s.ClockPadB, out l, out t, out r, out b);
+                s.ClockPadL = l; s.ClockPadT = t; s.ClockPadR = r; s.ClockPadB = b;
+            }
+        }
+
+        static void SetRemind(Skin s, string key, string val)
+        {
+            if (key == "background") s.RemindBg = ColorOf(val, s.RemindBg);
+            else if (key == "color") s.RemindFg = ColorOf(val, s.RemindFg);
+            else if (key == "border" || key == "border-color") ReadBorder(val, ref s.RemindBorder, ref s.RemindBorderW);
+            else if (key == "font-size") s.RemindFont = SizeOf(val, s.RemindFont);
+            else if (key == "radius" || key == "border-radius") s.RemindRadius = (int)SizeOf(val, s.RemindRadius);
+            else if (key == "padding")
+            {
+                int l, t, r, b;
+                PadOf(val, s.RemindPadL, s.RemindPadT, s.RemindPadR, s.RemindPadB, out l, out t, out r, out b);
+                s.RemindPadL = l; s.RemindPadT = t; s.RemindPadR = r; s.RemindPadB = b;
+            }
+        }
+
+        static void SetTimer(Skin s, string key, string val)
+        {
+            if (key == "background") s.TimerBg = ColorOf(val, s.TimerBg);
+            else if (key == "color") s.TimerFg = ColorOf(val, s.TimerFg);
+            else if (key == "border" || key == "border-color") ReadBorder(val, ref s.TimerBorder, ref s.TimerBorderW);
+            else if (key == "muted") s.TimerMuted = ColorOf(val, s.TimerMuted);
+            else if (key == "button") s.TimerButton = ColorOf(val, s.TimerButton);
+            else if (key == "alert") s.TimerAlert = ColorOf(val, s.TimerAlert);
+            else if (key == "font-size") s.TimerFont = SizeOf(val, s.TimerFont);
+            else if (key == "radius" || key == "border-radius") s.TimerRadius = (int)SizeOf(val, s.TimerRadius);
+            else if (key == "padding")
+            {
+                int l, t, r, b;
+                PadOf(val, s.TimerPadL, s.TimerPadT, s.TimerPadR, s.TimerPadB, out l, out t, out r, out b);
+                s.TimerPadL = l; s.TimerPadT = t; s.TimerPadR = r; s.TimerPadB = b;
             }
         }
 
@@ -499,29 +638,45 @@ namespace Mascot
                 return 23;
             if (s.MenuRadius != 12)
                 return 24;
+            Apply(s, ".clock { color: #abcdef; font-size: 22px; } .reminder { border: #010203; } .timer { button: #112233; alert: #ff00aa; }");
+            if (s.ClockFg.R != 0xab || s.ClockFont != 22f)
+                return 25;
+            if (s.RemindBorder.R != 1)
+                return 26;
+            if (s.TimerButton.R != 0x11 || s.TimerAlert.B != 0xaa)
+                return 27;
+            Apply(s, ".hover { border: 2px solid red; padding: 3 4 5 6; } .menu { border-radius: 7px; } .timer { border-radius: 9px; border: 3px solid #00ff00; }");
+            if (s.HoverBorder.R != 255 || s.HoverBorder.G != 0 || Math.Abs(s.HoverBorderW - 2f) > 0.01f)
+                return 28;
+            if (s.HoverPadL != 3 || s.HoverPadT != 4 || s.HoverPadR != 5 || s.HoverPadB != 6)
+                return 29;
+            if (s.MenuRadius != 7)
+                return 30;
+            if (s.TimerRadius != 9 || s.TimerBorder.G != 255 || Math.Abs(s.TimerBorderW - 3f) > 0.01f)
+                return 31;
+            Apply(s, ".menu { border: 1px solid rgb(201, 201, 201); } .timer { padding: 8 9 10 11; }");
+            if (s.MenuBorder.R != 201 || s.MenuBorder.G != 201 || s.MenuBorder.B != 201)
+                return 32;
+            if (s.TimerPadL != 8 || s.TimerPadT != 9 || s.TimerPadR != 10 || s.TimerPadB != 11)
+                return 33;
             return 0;
         }
 
-        static string DefaultText()
+        static void ReadBorder(string val, ref Color color, ref float width)
         {
-            return "/* .hover = bubble on the body. .menu = right-click list.\r\n"
-                + "   Colors are #rgb or #rrggbb. Edit, then hover or right-click again. */\r\n"
-                + ".hover {\r\n"
-                + "  background: #20242e;\r\n"
-                + "  color: #ffffff;\r\n"
-                + "  border: #5aa4e8;\r\n"
-                + "  font-size: 9.5;\r\n"
-                + "  radius: 8;\r\n"
-                + "}\r\n"
-                + ".menu {\r\n"
-                + "  background: #1c202a;\r\n"
-                + "  color: #ecf0f6;\r\n"
-                + "  border: #569ce0;\r\n"
-                + "  hover: #3076c4;\r\n"
-                + "  font-size: 10;\r\n"
-                + "  padding: 12 4 14 4;\r\n"
-                + "  border-radius: 8px;\r\n"
-                + "}\r\n";
+            color = ColorOf(val, color);
+            string[] parts = val.Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = 0; i < parts.Length; i++)
+            {
+                string bit = parts[i].ToLowerInvariant();
+                if (bit.EndsWith("px"))
+                    bit = bit.Substring(0, bit.Length - 2);
+                float w;
+                if (bit.Length > 0 && (char.IsDigit(bit[0]) || bit[0] == '.') &&
+                    float.TryParse(bit, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out w) &&
+                    w >= 0f && w <= 32f)
+                    width = w;
+            }
         }
 
         static string Strip(string css)
@@ -546,15 +701,69 @@ namespace Mascot
 
         static Color ColorOf(string val, Color fallback)
         {
-            string v = val.Trim();
-            if (v.Length > 0 && v[0] == '#')
-                v = v.Substring(1);
-            if (v.Length == 3)
-                v = "" + v[0] + v[0] + v[1] + v[1] + v[2] + v[2];
-            int rgb;
-            if (v.Length == 6 && int.TryParse(v, System.Globalization.NumberStyles.HexNumber, null, out rgb))
-                return Color.FromArgb(255, (rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+            Color hit;
+            if (TryRgb(val, out hit))
+                return hit;
+            if (TryColor(val, out hit))
+                return hit;
+            string[] parts = val.Split(new char[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+            for (int i = parts.Length - 1; i >= 0; i--)
+            {
+                if (TryColor(parts[i], out hit))
+                    return hit;
+            }
             return fallback;
+        }
+
+        static bool TryRgb(string val, out Color color)
+        {
+            color = Color.Empty;
+            int p = val.IndexOf("rgb", StringComparison.OrdinalIgnoreCase);
+            if (p < 0)
+                return false;
+            int open = val.IndexOf('(', p);
+            int close = open < 0 ? -1 : val.IndexOf(')', open + 1);
+            if (open < 0 || close < 0)
+                return false;
+            string[] n = val.Substring(open + 1, close - open - 1).Split(',');
+            if (n.Length < 3)
+                return false;
+            int r, g, b;
+            if (!int.TryParse(n[0].Trim(), out r) || !int.TryParse(n[1].Trim(), out g) || !int.TryParse(n[2].Trim(), out b))
+                return false;
+            if (r < 0 || r > 255 || g < 0 || g > 255 || b < 0 || b > 255)
+                return false;
+            color = Color.FromArgb(255, r, g, b);
+            return true;
+        }
+
+        static bool TryColor(string val, out Color color)
+        {
+            color = Color.Empty;
+            string v = val.Trim();
+            int hash = v.IndexOf('#');
+            if (hash >= 0)
+            {
+                v = v.Substring(hash + 1);
+                int n = 0;
+                while (n < v.Length && ((v[n] >= '0' && v[n] <= '9') || (v[n] >= 'a' && v[n] <= 'f') || (v[n] >= 'A' && v[n] <= 'F')))
+                    n++;
+                v = v.Substring(0, n);
+                if (v.Length == 3)
+                    v = "" + v[0] + v[0] + v[1] + v[1] + v[2] + v[2];
+                int rgb;
+                if (v.Length == 6 && int.TryParse(v, System.Globalization.NumberStyles.HexNumber, null, out rgb))
+                {
+                    color = Color.FromArgb(255, (rgb >> 16) & 255, (rgb >> 8) & 255, rgb & 255);
+                    return true;
+                }
+                return false;
+            }
+            Color named = Color.FromName(v);
+            if (!named.IsKnownColor)
+                return false;
+            color = Color.FromArgb(255, named);
+            return true;
         }
 
         static float SizeOf(string val, float fallback)
@@ -640,6 +849,7 @@ namespace Mascot
     {
         public Color Text = Color.FromArgb(236, 240, 246);
         public int Radius = 8;
+        public float EdgeW = 1f;
 
         public MenuPaint(MenuLook look) : base(look)
         {
@@ -660,7 +870,7 @@ namespace Mascot
             Rectangle r = new Rectangle(0, 0, e.ToolStrip.Width - 1, e.ToolStrip.Height - 1);
             e.Graphics.SmoothingMode = SmoothingMode.AntiAlias;
             using (GraphicsPath path = Skin.Round(r, Radius))
-            using (Pen edge = new Pen(ColorTable.MenuBorder))
+            using (Pen edge = new Pen(ColorTable.MenuBorder, EdgeW))
                 e.Graphics.DrawPath(edge, path);
         }
 
@@ -729,14 +939,21 @@ namespace Mascot
         Color _bg = Color.FromArgb(255, 32, 36, 46);
         Color _fg = Color.White;
         Color _edge = Color.FromArgb(255, 90, 164, 232);
+        float _edgeW = 1.4f;
         int _radius = 8;
+        int _padL = 11, _padT = 8, _padR = 11, _padB = 6;
 
         public void Apply(Skin skin)
         {
             _bg = skin.HoverBg;
             _fg = skin.HoverFg;
             _edge = skin.HoverBorder;
+            _edgeW = skin.HoverBorderW;
             _radius = skin.HoverRadius < 2 ? 2 : skin.HoverRadius;
+            _padL = skin.HoverPadL;
+            _padT = skin.HoverPadT;
+            _padR = skin.HoverPadR;
+            _padB = skin.HoverPadB;
             if (Math.Abs(_font.Size - skin.HoverFont) > 0.1f)
             {
                 _font.Dispose();
@@ -773,11 +990,9 @@ namespace Mascot
         public void Say(string text, int anchorX, int anchorY)
         {
             _text = text;
-            Size sz;
-            using (Bitmap tmp = new Bitmap(1, 1))
-            using (Graphics g = Graphics.FromImage(tmp))
-                sz = TextRenderer.MeasureText(g, text, _font);
-            ClientSize = new Size(sz.Width + 22, sz.Height + 22);
+            TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
+            Size sz = TextRenderer.MeasureText(text, _font, new Size(800, 200), flags);
+            ClientSize = new Size(sz.Width + _padL + _padR + 4, sz.Height + _padT + _padB + 12);
             Place(anchorX, anchorY);
             Invalidate();
             if (!Visible)
@@ -791,27 +1006,67 @@ namespace Mascot
 
         protected override void OnPaint(PaintEventArgs e)
         {
-            Graphics g = e.Graphics;
-            g.SmoothingMode = SmoothingMode.AntiAlias;
-            g.Clear(Color.Magenta);
+            int w = Math.Max(1, Width);
+            int h = Math.Max(1, Height);
             int tail = 8;
-            Rectangle body = new Rectangle(1, 1, Width - 3, Height - tail - 2);
-            int rad = _radius;
-            if (rad * 2 > body.Width) rad = Math.Max(1, body.Width / 2);
-            if (rad * 2 > body.Height) rad = Math.Max(1, body.Height / 2);
-            using (GraphicsPath path = Skin.Round(body, rad))
-            using (SolidBrush fill = new SolidBrush(_bg))
-            using (Pen edge = new Pen(_edge, 1.4f))
+            using (Bitmap bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb))
             {
-                g.FillPath(fill, path);
-                g.FillPolygon(fill, new Point[] {
-                    new Point(Width / 2 - 6, body.Bottom - 1),
-                    new Point(Width / 2 + 6, body.Bottom - 1),
-                    new Point(Width / 2, Height - 2)
-                });
-                g.DrawPath(edge, path);
+                using (Graphics g = Graphics.FromImage(bmp))
+                {
+                    g.SmoothingMode = SmoothingMode.AntiAlias;
+                    g.Clear(Color.Transparent);
+                    Rectangle body = new Rectangle(1, 1, w - 3, h - tail - 2);
+                    int rad = _radius;
+                    if (rad * 2 > body.Width) rad = Math.Max(1, body.Width / 2);
+                    if (rad * 2 > body.Height) rad = Math.Max(1, body.Height / 2);
+                    using (GraphicsPath path = Skin.Round(body, rad))
+                    using (SolidBrush fill = new SolidBrush(_bg))
+                    using (Pen edge = new Pen(_edge, _edgeW))
+                    {
+                        g.FillPath(fill, path);
+                        g.FillPolygon(fill, new Point[] {
+                            new Point(w / 2 - 6, body.Bottom - 1),
+                            new Point(w / 2 + 6, body.Bottom - 1),
+                            new Point(w / 2, h - 2)
+                        });
+                        g.DrawPath(edge, path);
+                    }
+                }
+                KeyMagenta(bmp);
+                e.Graphics.DrawImage(bmp, 0, 0);
             }
-            TextRenderer.DrawText(g, _text, _font, new Rectangle(6, 3, Width - 12, body.Height - 4), _fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter);
+            Rectangle text = new Rectangle(_padL, _padT, w - _padL - _padR, h - tail - _padT - _padB);
+            TextRenderer.DrawText(e.Graphics, _text, _font, text, _fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+        }
+
+        static void KeyMagenta(Bitmap bmp)
+        {
+            BitmapData data = bmp.LockBits(new Rectangle(0, 0, bmp.Width, bmp.Height), ImageLockMode.ReadWrite, PixelFormat.Format32bppArgb);
+            int stride = data.Stride;
+            int bytes = Math.Abs(stride) * bmp.Height;
+            byte[] buf = new byte[bytes];
+            Marshal.Copy(data.Scan0, buf, 0, bytes);
+            for (int y = 0; y < bmp.Height; y++)
+            {
+                int row = y * stride;
+                if (row < 0)
+                    row = (bmp.Height - 1 - y) * Math.Abs(stride);
+                for (int x = 0; x < bmp.Width; x++)
+                {
+                    int i = row + x * 4;
+                    if (buf[i + 3] < 128)
+                    {
+                        buf[i] = 255;
+                        buf[i + 1] = 0;
+                        buf[i + 2] = 255;
+                        buf[i + 3] = 255;
+                    }
+                    else
+                        buf[i + 3] = 255;
+                }
+            }
+            Marshal.Copy(buf, 0, data.Scan0, bytes);
+            bmp.UnlockBits(data);
         }
 
         protected override void Dispose(bool disposing)
@@ -827,6 +1082,7 @@ namespace Mascot
         const int HitAlpha = 96;
         const int WM_NCHITTEST = 0x84;
         const int WM_MOUSEWHEEL = 0x020A;
+        const int WM_DISPLAYCHANGE = 0x007E;
         const int HTTRANSPARENT = -1;
         const int HTCLIENT = 1;
         const int ULW_ALPHA = 2;
@@ -879,6 +1135,7 @@ namespace Mascot
         Bitmap _compose;
         FaceRig _rig;
         SayBubble _say;
+        TimerCard _timers;
         double _sayUntil;
         float _petDir;
         float _petDirSign;
@@ -959,7 +1216,6 @@ namespace Mascot
             _timer.Tick += OnTick;
 
             BuildTray();
-            SystemEvents.DisplaySettingsChanged += OnDisplayChanged;
         }
 
         protected override bool ShowWithoutActivation
@@ -991,12 +1247,12 @@ namespace Mascot
             _headingTarget = _heading;
             RenderPose();
             _timer.Start();
+            EnsureTimers();
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             _timer.Stop();
-            SystemEvents.DisplaySettingsChanged -= OnDisplayChanged;
             if (_tray != null)
             {
                 _tray.Visible = false;
@@ -1012,6 +1268,8 @@ namespace Mascot
                 _compose.Dispose();
             if (_say != null)
                 _say.Dispose();
+            if (_timers != null)
+                _timers.Dispose();
             if (_clickWait != null)
                 _clickWait.Dispose();
             if (_holdWait != null)
@@ -1092,6 +1350,8 @@ namespace Mascot
                 m.Result = IntPtr.Zero;
                 return;
             }
+            if (m.Msg == WM_DISPLAYCHANGE)
+                RefreshScreens();
             if (m.Msg == WM_NCHITTEST)
             {
                 POINT p;
@@ -1169,12 +1429,6 @@ namespace Mascot
             _timer.Stop();
             Hide();
             SyncMenu();
-        }
-
-        void OnDisplayChanged(object sender, EventArgs e)
-        {
-            if (IsHandleCreated)
-                BeginInvoke(new Action(RefreshScreens));
         }
 
         void RefreshScreens()
@@ -1272,12 +1526,14 @@ namespace Mascot
             }
 
             RenderPose();
+            if (_timers != null)
+                _timers.Follow();
             if (_say != null && _say.Visible)
             {
                 if (t > _sayUntil)
                     HideSay();
                 else
-                    _say.Place(_winX + Motion.Width / 2, _winY - 2);
+                    ParkSay();
             }
         }
 
@@ -1462,7 +1718,19 @@ namespace Mascot
                 _say = new SayBubble();
             _say.Apply(Skin.Load());
             _sayUntil = Now + 2.4;
-            _say.Say(text, _winX + Motion.Width / 2, _winY - 2);
+            _say.Say(text, 0, 0);
+            if (_timers != null)
+                _timers.Follow();
+            ParkSay();
+        }
+
+        void ParkSay()
+        {
+            Rectangle body = ContentBox();
+            int y = body.Top - 8;
+            if (_timers != null && _timers.Visible)
+                y = _timers.Top - 8;
+            _say.Place(body.Left + body.Width / 2, y);
         }
 
         void ArmHold()
@@ -1546,6 +1814,8 @@ namespace Mascot
                 Happy();
             else if (action == "hide")
                 StopPet();
+            else if (action == "timers")
+                OpenTimers();
             else if (action == "dance" || action == "avatar")
                 RunUserCommand(action, ev.command, null, null, null);
             else if (!string.IsNullOrEmpty(action))
@@ -1763,9 +2033,34 @@ namespace Mascot
             _presented = true;
         }
 
+        Rectangle ContentBox()
+        {
+            int left, top, right, bottom;
+            if (!Pixels.Bounds(_frame.Alpha, _frame.W, _frame.H, out left, out top, out right, out bottom))
+                return new Rectangle(_winX, _winY, Motion.Width, Motion.Height);
+            return new Rectangle(_winX + left, _winY + top, right - left, bottom - top);
+        }
+
         void ShowCommandMenu()
         {
             ShowMenu("commands.json", MenuCommand.CommandsText(), "Add commands.json");
+        }
+
+        void EnsureTimers()
+        {
+            if (_timers != null)
+                return;
+            _timers = new TimerCard(delegate
+            {
+                return ContentBox();
+            });
+            _timers.LoadSaved();
+        }
+
+        void OpenTimers()
+        {
+            EnsureTimers();
+            _timers.ShowSetup();
         }
 
         void ShowAvatarMenu()
@@ -1789,6 +2084,7 @@ namespace Mascot
             MenuPaint paint = new MenuPaint(look);
             paint.Text = skin.MenuFg;
             paint.Radius = skin.MenuRadius;
+            paint.EdgeW = skin.MenuBorderW;
             RoundMenu menu = new RoundMenu();
             menu.Radius = skin.MenuRadius;
             menu.Renderer = paint;
@@ -1833,6 +2129,11 @@ namespace Mascot
 
         void RunUserCommand(string action, string command, float? yaw, float? turn, float? scale)
         {
+            if (action == "timers")
+            {
+                OpenTimers();
+                return;
+            }
             if (action == "dance")
             {
                 _danceUntil = Now + 4.2;

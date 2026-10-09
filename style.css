@@ -1,20 +1,55 @@
-/* .hover = bubble on the body. .menu = right-click list.
-   Colors are #rgb or #rrggbb. Edit, then hover or right-click again. */
+/* .hover = speech bubble. .menu = right-click list.
+   .clock = ticking countdown. .reminder = message after the time, until click.
+   .timer = add/edit card.
+   Color: #rgb, #rrggbb, or a name (red). Border: #5ce8f0  or  1px solid #5ce8f0.
+   Edit, then hover, right-click, or open Timers again. */
 .hover {
-  background: #ffffff;
-  color: #000000;
-  border-radius: 12px;
+  background: #2c2c2c;
+  color: #f3f3f3;
+  border: 1px solid #4a4a4a;
+  border-radius: 8px;
   font-size: 9.5;
   padding: 12 4 14 4;
 }
 .menu {
-  background: #ffffff;
-  color: #000000;
+  background: #2c2c2c;
+  color: #f3f3f3;
   font-size: 10;
-  border-radius: 12px;
+  border-radius: 8px;
   padding: 12 4 14 4;
+  border: 1px solid rgb(201, 201, 201);
 }
 
 .menu:active {
-  border-radius: 16px;
+  border-radius: 12px;
+}
+
+.clock {
+  background: #2c2c2c;
+  color: #f3f3f3;
+  border: #4a4a4a;
+  font-size: 12;
+  border-radius: 8px;
+  padding: 4;
+}
+
+.reminder {
+  background: #2a1a0c;
+  color: #ffc46e;
+  border: #ffb048;
+  font-size: 11;
+  border-radius: 12px;
+  padding: 8 3 8 3;
+}
+
+.timer {
+  background: #2c2c2c;
+  color: #f3f3f3;
+  border: #4a4a4a;
+  muted: #f3f3f3;
+  button: #2c2c2c;
+  alert: #ffb048;
+  font-size: 11;
+  border-radius: 12px;
+  padding: 20 16 20 16;
 }

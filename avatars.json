@@ -13,12 +13,6 @@
 		"scale": 0.35
 	},
 	{
-		"label": "Husky",
-		"action": "avatar",
-		"command": "husky.png",
-		"scale": 0.35
-	},
-	{
 		"label": "Fish",
 		"action": "avatar",
 		"command": "3d avatars/fish.glb",
@@ -64,6 +58,6 @@
 		"command": "3d avatars/robot.glb",
 		"yawOffset": 0,
 		"turn": 270,
-		"scale": 0.75
+		"scale": 0.65
 	}
 ]

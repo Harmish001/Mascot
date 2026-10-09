@@ -863,7 +863,6 @@ namespace Mascot
         readonly float[] _shadow = new float[17 * 3];
         GCHandle _posPin, _nrmPin, _uvPin, _idxPin, _texPin, _rgbaPin;
         IntPtr _hwnd, _dc, _rc;
-        WndProc _proc;
         uint _tex;
         uint _fbo;
         uint _color;
@@ -879,6 +878,8 @@ namespace Mascot
         GlStatus _fbStatus;
 
         delegate IntPtr WndProc(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
+        // Class stays registered after the first avatar. Instance delegate would be collected on switch.
+        static readonly WndProc ClassProc = DefWindowProc;
         delegate void GlGen(int n, ref uint id);
         delegate void GlBind(int target, uint id);
         delegate void GlTex2D(int target, int attachment, int textarget, uint texture, int level);
@@ -940,7 +941,9 @@ namespace Mascot
                 roll = 0f;
                 lift01 = 0f;
             }
-            wglMakeCurrent(_dc, _rc);
+            // ponytail: skip frame if the GL context died (sleep/TDR). Recreate GlAvatar if the pet stays frozen after wake.
+            if (!wglMakeCurrent(_dc, _rc))
+                return;
             _bindFbo(0x8D40, _fbo);
             glViewport(0, 0, Width, Height);
             glClearColor(0f, 0f, 0f, 0f);
@@ -1063,10 +1066,9 @@ namespace Mascot
 
         void CreateGl()
         {
-            _proc = DefWindowProc;
             WNDCLASS wc = new WNDCLASS();
             wc.style = CS_OWNDC;
-            wc.lpfnWndProc = _proc;
+            wc.lpfnWndProc = ClassProc;
             wc.hInstance = GetModuleHandle(null);
             wc.lpszClassName = "MascotGL";
             ushort atom = RegisterClassW(ref wc);

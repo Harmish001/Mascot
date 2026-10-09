@@ -4,7 +4,38 @@
 	{
 		"on": "hover",
 		"action": "say",
-		"lines": ["Hi!", "Hey there", "Hello!", "What's up?", "Boop!"]
+		"lines": [
+			"Hi!",
+			"Hey there",
+			"Hello!",
+			"What's up?",
+			"Boop!",
+			"Bloop!",
+			"Poke!",
+			"Yo!",
+			"Peekaboo!",
+			"Ooh!",
+			"Beep boop!",
+			"Hey, that tickles!",
+			"Cursor detected!",
+			"Caught me mid-roam!",
+			"Need something?",
+			"Are we playing tag?",
+			"10/10 hover skills.",
+			"I'm working here...",
+			"Is this a staring contest?",
+			"Busy doing mascot things.",
+			"Move along!",
+			"Hydration check! 💧",
+			"Fix that posture!",
+			"Hope you're having a good day!",
+			"Take a quick breather!",
+			"Status: 100% operational.",
+			"Battery: Fueled by snacks.",
+			"Vibe check: Passed.",
+			"Scanning for bugs...",
+			"Roam mode: Active"
+		]
 	},
 	{ "on": "pet", "action": "happy" },
 	{ "on": "rightClick", "action": "menu" },
@@ -12,7 +43,7 @@
 	{ "on": "mouseDown" },
 	{ "on": "mouseUp" },
 	{ "on": "mouseLeave" },
-	{ "on": "middleClick", "command": "wt.exe"  },
+	{ "on": "middleClick", "command": "wt.exe" },
 	{ "on": "wheelUp" },
 	{ "on": "wheelDown" }
 ]
