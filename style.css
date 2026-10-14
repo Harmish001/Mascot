@@ -53,3 +53,12 @@
   border-radius: 12px;
   padding: 20 16 20 16;
 }
+
+.note {
+  background: #1b2430;
+  color: #f4f7fb;
+  border: 2px solid #4a4a4a;
+  border-radius: 16px;
+  font-size: 12;
+  padding: 16 14 16 14;
+}

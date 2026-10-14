@@ -18,7 +18,7 @@
 		"command": "3d avatars/fish.glb",
 		"yawOffset": 90,
 		"turn": 180,
-		"scale": 0.8
+		"scale": 0.7
 	},
 	{
 		"label": "Panda 3D",

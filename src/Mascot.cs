@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Drawing2D;
@@ -37,6 +38,9 @@ namespace Mascot
                 int pixels = Pixels.SelfCheck();
                 if (pixels != 0)
                     return pixels;
+                int pals = Friends.SelfCheck();
+                if (pals != 0)
+                    return pals;
                 try
                 {
                     return GlbMesh.SelfCheck(AvatarConfig.Load().ModelPath);
@@ -46,6 +50,12 @@ namespace Mascot
                     Console.Error.WriteLine(ex.Message);
                     return 1;
                 }
+            }
+
+            if (args.Length > 0 && args[0] == "--relay")
+            {
+                AttachConsole(ATTACH_PARENT_PROCESS);
+                return Friends.Serve(args);
             }
 
             try
@@ -71,7 +81,7 @@ namespace Mascot
             catch (Exception ex)
             {
                 string dir = Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location);
-                File.WriteAllText(Path.Combine(dir, "mascot-error.txt"), ex.ToString());
+                File.AppendAllText(Path.Combine(dir, "mascot-error.txt"), "\r\nCRASH " + DateTime.Now.ToString("HH:mm:ss") + "\r\n" + ex + "\r\n");
                 MessageBox.Show(ex.Message, "Mascot");
                 return 1;
             }
@@ -496,6 +506,13 @@ namespace Mascot
         public float TimerBorderW = 2f;
         public int TimerRadius = 2;
         public int TimerPadL = 16, TimerPadT = 14, TimerPadR = 16, TimerPadB = 14;
+        public Color NoteBg = Color.FromArgb(27, 36, 48);
+        public Color NoteFg = Color.FromArgb(244, 247, 251);
+        public Color NoteBorder = Color.FromArgb(122, 162, 255);
+        public float NoteBorderW = 2f;
+        public float NoteFont = 12f;
+        public int NoteRadius = 16;
+        public int NotePadL = 16, NotePadT = 14, NotePadR = 16, NotePadB = 14;
 
         public static Skin Load()
         {
@@ -541,6 +558,8 @@ namespace Mascot
                         SetRemind(s, key, val);
                     else if (sel == "timer")
                         SetTimer(s, key, val);
+                    else if (sel == "note")
+                        SetNote(s, key, val);
                 }
             }
         }
@@ -624,6 +643,21 @@ namespace Mascot
             }
         }
 
+        static void SetNote(Skin s, string key, string val)
+        {
+            if (key == "background") s.NoteBg = ColorOf(val, s.NoteBg);
+            else if (key == "color") s.NoteFg = ColorOf(val, s.NoteFg);
+            else if (key == "border" || key == "border-color") ReadBorder(val, ref s.NoteBorder, ref s.NoteBorderW);
+            else if (key == "font-size") s.NoteFont = SizeOf(val, s.NoteFont);
+            else if (key == "radius" || key == "border-radius") s.NoteRadius = (int)SizeOf(val, s.NoteRadius);
+            else if (key == "padding")
+            {
+                int l, t, r, b;
+                PadOf(val, s.NotePadL, s.NotePadT, s.NotePadR, s.NotePadB, out l, out t, out r, out b);
+                s.NotePadL = l; s.NotePadT = t; s.NotePadR = r; s.NotePadB = b;
+            }
+        }
+
         public static int SelfCheck()
         {
             Skin s = new Skin();
@@ -659,6 +693,13 @@ namespace Mascot
                 return 32;
             if (s.TimerPadL != 8 || s.TimerPadT != 9 || s.TimerPadR != 10 || s.TimerPadB != 11)
                 return 33;
+            Apply(s, ".note { background: #112233; color: #abcdef; font-size: 13px; border-radius: 18px; padding: 4 5 6 7; border: 2px solid #00ff00; }");
+            if (s.NoteBg.R != 0x11 || s.NoteFg.R != 0xab || s.NoteFont != 13f || s.NoteRadius != 18)
+                return 34;
+            if (s.NotePadL != 4 || s.NotePadT != 5 || s.NotePadR != 6 || s.NotePadB != 7)
+                return 35;
+            if (s.NoteBorder.G != 255 || Math.Abs(s.NoteBorderW - 2f) > 0.01f)
+                return 36;
             return 0;
         }
 
@@ -935,6 +976,9 @@ namespace Mascot
     sealed class SayBubble : Form
     {
         string _text = "";
+        string _clip;
+        string _open;
+        bool _card;
         Font _font = new Font("Segoe UI", 9.5f);
         Color _bg = Color.FromArgb(255, 32, 36, 46);
         Color _fg = Color.White;
@@ -954,10 +998,29 @@ namespace Mascot
             _padT = skin.HoverPadT;
             _padR = skin.HoverPadR;
             _padB = skin.HoverPadB;
-            if (Math.Abs(_font.Size - skin.HoverFont) > 0.1f)
+            FitFont(skin.HoverFont);
+        }
+
+        public void ApplyNote(Skin skin)
+        {
+            _bg = skin.NoteBg;
+            _fg = skin.NoteFg;
+            _edge = skin.NoteBorder;
+            _edgeW = skin.NoteBorderW;
+            _radius = skin.NoteRadius < 2 ? 2 : skin.NoteRadius;
+            _padL = skin.NotePadL;
+            _padT = skin.NotePadT;
+            _padR = skin.NotePadR;
+            _padB = skin.NotePadB;
+            FitFont(skin.NoteFont);
+        }
+
+        void FitFont(float size)
+        {
+            if (Math.Abs(_font.Size - size) > 0.1f)
             {
                 _font.Dispose();
-                _font = new Font("Segoe UI", skin.HoverFont);
+                _font = new Font("Segoe UI", size);
             }
         }
 
@@ -987,13 +1050,48 @@ namespace Mascot
             }
         }
 
+        public event EventHandler Copied;
+
         public void Say(string text, int anchorX, int anchorY)
         {
-            _text = text;
-            TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix;
-            Size sz = TextRenderer.MeasureText(text, _font, new Size(800, 200), flags);
-            ClientSize = new Size(sz.Width + _padL + _padR + 4, sz.Height + _padT + _padB + 12);
-            Place(anchorX, anchorY);
+            Say(text, anchorX, anchorY, false);
+        }
+
+        public void Say(string text, int anchorX, int anchorY, bool copy)
+        {
+            _card = false;
+            _open = null;
+            _clip = copy ? text : null;
+            _text = text ?? "";
+            ShowText(copy);
+        }
+
+        public void Note(string text, string clip, string openPath)
+        {
+            _card = true;
+            _open = openPath;
+            _clip = string.IsNullOrEmpty(openPath) ? clip : null;
+            _text = text ?? "";
+            ShowText(true);
+        }
+
+        void ShowText(bool wrap)
+        {
+            Cursor = (_clip != null || _open != null) ? Cursors.Hand : Cursors.Default;
+            TextFormatFlags flags = TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+            int maxW = 800;
+            if (wrap)
+            {
+                flags |= TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl;
+                maxW = _card ? 280 : 260;
+            }
+            else
+                flags |= TextFormatFlags.SingleLine;
+            Size sz = TextRenderer.MeasureText(_text, _font, new Size(maxW, 800), flags);
+            int w = wrap ? Math.Max(sz.Width, _card ? 160 : 120) : sz.Width;
+            int tail = _card ? 0 : 12;
+            ClientSize = new Size(w + _padL + _padR + 4, sz.Height + _padT + _padB + tail);
+            Place(0, 0);
             Invalidate();
             if (!Visible)
                 Show();
@@ -1008,7 +1106,7 @@ namespace Mascot
         {
             int w = Math.Max(1, Width);
             int h = Math.Max(1, Height);
-            int tail = 8;
+            int tail = _card ? 0 : 8;
             using (Bitmap bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb))
             {
                 using (Graphics g = Graphics.FromImage(bmp))
@@ -1024,11 +1122,14 @@ namespace Mascot
                     using (Pen edge = new Pen(_edge, _edgeW))
                     {
                         g.FillPath(fill, path);
-                        g.FillPolygon(fill, new Point[] {
-                            new Point(w / 2 - 6, body.Bottom - 1),
-                            new Point(w / 2 + 6, body.Bottom - 1),
-                            new Point(w / 2, h - 2)
-                        });
+                        if (!_card)
+                        {
+                            g.FillPolygon(fill, new Point[] {
+                                new Point(w / 2 - 6, body.Bottom - 1),
+                                new Point(w / 2 + 6, body.Bottom - 1),
+                                new Point(w / 2, h - 2)
+                            });
+                        }
                         g.DrawPath(edge, path);
                     }
                 }
@@ -1036,7 +1137,43 @@ namespace Mascot
                 e.Graphics.DrawImage(bmp, 0, 0);
             }
             Rectangle text = new Rectangle(_padL, _padT, w - _padL - _padR, h - tail - _padT - _padB);
-            TextRenderer.DrawText(e.Graphics, _text, _font, text, _fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix);
+            TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
+            if (_clip != null || _card)
+                flags |= TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl;
+            else
+                flags |= TextFormatFlags.SingleLine;
+            TextRenderer.DrawText(e.Graphics, _text, _font, text, _fg, flags);
+        }
+
+        protected override void OnMouseUp(MouseEventArgs e)
+        {
+            base.OnMouseUp(e);
+            if (string.IsNullOrEmpty(_open) && _clip == null)
+                return;
+            try
+            {
+                if (!string.IsNullOrEmpty(_open))
+                    CopyFile(_open);
+                else
+                    Clipboard.SetText(_clip);
+            }
+            catch
+            {
+            }
+            Hide();
+            if (Copied != null)
+                Copied(this, EventArgs.Empty);
+        }
+
+        public static void CopyFile(string path)
+        {
+            System.Collections.Specialized.StringCollection files = new System.Collections.Specialized.StringCollection();
+            files.Add(path);
+            DataObject data = new DataObject();
+            data.SetFileDropList(files);
+            data.SetData("Preferred DropEffect", new MemoryStream(new byte[] { 1, 0, 0, 0 }));
+            Clipboard.SetDataObject(data, true, 20, 50);
+            Friends.Log("clipboard set " + path);
         }
 
         static void KeyMagenta(Bitmap bmp)
@@ -1079,6 +1216,193 @@ namespace Mascot
 
     sealed class PetForm : Form
     {
+        struct HeldNote
+        {
+            public string Text;
+            public string Clip;
+            public string Open;
+        }
+
+        // Sits on the sprite. UpdateLayeredWindow never receives Explorer drops.
+        sealed class DropPad : Form
+        {
+            readonly PetForm _pet;
+            int _rgnAt;
+
+            public DropPad(PetForm pet)
+            {
+                _pet = pet;
+                FormBorderStyle = FormBorderStyle.None;
+                ShowInTaskbar = false;
+                StartPosition = FormStartPosition.Manual;
+                TopMost = true;
+                AllowDrop = true;
+                Opacity = 1.0 / 255.0;
+                Cursor = Cursors.Hand;
+            }
+
+            protected override bool ShowWithoutActivation
+            {
+                get { return true; }
+            }
+
+            protected override CreateParams CreateParams
+            {
+                get
+                {
+                    const int WS_EX_TOOLWINDOW = 0x00000080;
+                    const int WS_EX_NOACTIVATE = 0x08000000;
+                    CreateParams cp = base.CreateParams;
+                    cp.ExStyle |= WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE;
+                    return cp;
+                }
+            }
+
+            public void Park(int x, int y, int w, int h, byte[] alpha)
+            {
+                if (w < 1) w = 1;
+                if (h < 1) h = 1;
+                int now = Environment.TickCount;
+                if (_rgnAt == 0 || unchecked(now - _rgnAt) >= 150)
+                {
+                    _rgnAt = now;
+                    IntPtr rgn = MakeRgn(alpha, w, h);
+                    if (SetWindowRgn(Handle, rgn, false) == 0)
+                        DeleteObject(rgn);
+                }
+                SetWindowPos(Handle, new IntPtr(-1), x, y, w, h, 0x0010 | 0x0040);
+            }
+
+            protected override void OnMouseEnter(EventArgs e)
+            {
+                base.OnMouseEnter(e);
+                _pet.OnMouseEnter(e);
+            }
+
+            protected override void OnMouseLeave(EventArgs e)
+            {
+                base.OnMouseLeave(e);
+                _pet.OnMouseLeave(e);
+            }
+
+            protected override void OnMouseDown(MouseEventArgs e)
+            {
+                base.OnMouseDown(e);
+                _pet.OnMouseDown(e);
+                if (e.Button == MouseButtons.Left)
+                    Capture = true;
+            }
+
+            protected override void OnMouseMove(MouseEventArgs e)
+            {
+                base.OnMouseMove(e);
+                _pet.OnMouseMove(e);
+            }
+
+            protected override void OnMouseUp(MouseEventArgs e)
+            {
+                base.OnMouseUp(e);
+                if (e.Button == MouseButtons.Left)
+                    Capture = false;
+                _pet.OnMouseUp(e);
+            }
+
+            protected override void OnDragEnter(DragEventArgs e)
+            {
+                base.OnDragEnter(e);
+                e.Effect = Files(e) ? DragDropEffects.Copy : DragDropEffects.None;
+            }
+
+            protected override void OnDragOver(DragEventArgs e)
+            {
+                base.OnDragOver(e);
+                e.Effect = Files(e) ? DragDropEffects.Copy : DragDropEffects.None;
+            }
+
+            protected override void OnDragDrop(DragEventArgs e)
+            {
+                base.OnDragDrop(e);
+                if (!Files(e))
+                    return;
+                string[] files = e.Data.GetData(DataFormats.FileDrop) as string[];
+                if (files == null)
+                    return;
+                for (int i = 0; i < files.Length; i++)
+                    Friends.SendFile(files[i]);
+            }
+
+            static bool Files(DragEventArgs e)
+            {
+                return e.Data != null && e.Data.GetDataPresent(DataFormats.FileDrop);
+            }
+
+            protected override void WndProc(ref Message m)
+            {
+                if (m.Msg == 0x0021)
+                {
+                    m.Result = (IntPtr)3;
+                    return;
+                }
+                if (m.Msg == 0x020A)
+                {
+                    int delta = (short)((m.WParam.ToInt32() >> 16) & 0xffff);
+                    _pet.RunEvent(delta > 0 ? "wheelUp" : "wheelDown");
+                    m.Result = IntPtr.Zero;
+                    return;
+                }
+                base.WndProc(ref m);
+            }
+
+            static IntPtr MakeRgn(byte[] alpha, int w, int h)
+            {
+                IntPtr acc = CreateRectRgn(0, 0, 0, 0);
+                if (alpha == null || alpha.Length < w * h)
+                {
+                    DeleteObject(acc);
+                    return CreateRectRgn(0, 0, w, h);
+                }
+                bool any = false;
+                for (int y = 0; y < h; y++)
+                {
+                    int x = 0;
+                    int row = y * w;
+                    while (x < w)
+                    {
+                        while (x < w && alpha[row + x] < HitAlpha)
+                            x++;
+                        if (x >= w)
+                            break;
+                        int start = x;
+                        while (x < w && alpha[row + x] >= HitAlpha)
+                            x++;
+                        IntPtr run = CreateRectRgn(start, y, x, y + 1);
+                        CombineRgn(acc, acc, run, 2);
+                        DeleteObject(run);
+                        any = true;
+                    }
+                }
+                if (any)
+                    return acc;
+                DeleteObject(acc);
+                return CreateRectRgn(0, 0, w, h);
+            }
+
+            [DllImport("gdi32.dll")]
+            static extern IntPtr CreateRectRgn(int left, int top, int right, int bottom);
+
+            [DllImport("gdi32.dll")]
+            static extern int CombineRgn(IntPtr dest, IntPtr a, IntPtr b, int mode);
+
+            [DllImport("gdi32.dll")]
+            static extern bool DeleteObject(IntPtr obj);
+
+            [DllImport("user32.dll")]
+            static extern int SetWindowRgn(IntPtr hwnd, IntPtr rgn, bool redraw);
+
+            [DllImport("user32.dll")]
+            static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+        }
+
         const int HitAlpha = 96;
         const int WM_NCHITTEST = 0x84;
         const int WM_MOUSEWHEEL = 0x020A;
@@ -1149,8 +1473,19 @@ namespace Mascot
         ContextMenuStrip _cmdMenu;
         System.Windows.Forms.Timer _clickWait;
         System.Windows.Forms.Timer _holdWait;
+        System.Windows.Forms.Timer _midWait;
         bool _armClick;
         bool _holdFired;
+        bool _midDown;
+        bool _midFired;
+        static PetForm _keys;
+        static IntPtr _keyHook;
+        static HookProc _keyProc;
+        static bool _lctrl;
+        static bool _rctrl;
+        static bool _mDown;
+        bool _sayHold;
+        Queue<HeldNote> _noteQueue = new Queue<HeldNote>();
         Mode _mode = Mode.Walk;
         bool _presented;
         bool _dragging;
@@ -1248,11 +1583,17 @@ namespace Mascot
             RenderPose();
             _timer.Start();
             EnsureTimers();
+            ArmKeys();
+            BeginInvoke(new Action(delegate { Friends.Start(this); }));
         }
 
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
             _timer.Stop();
+            DisarmKeys();
+            Friends.Stop();
+            if (_midWait != null)
+                _midWait.Dispose();
             if (_tray != null)
             {
                 _tray.Visible = false;
@@ -1270,6 +1611,8 @@ namespace Mascot
                 _say.Dispose();
             if (_timers != null)
                 _timers.Dispose();
+            if (_pad != null)
+                _pad.Dispose();
             if (_clickWait != null)
                 _clickWait.Dispose();
             if (_holdWait != null)
@@ -1290,7 +1633,8 @@ namespace Mascot
         protected override void OnMouseLeave(EventArgs e)
         {
             base.OnMouseLeave(e);
-            HideSay();
+            if (!_sayHold)
+                HideSay();
             if (_holdWait != null)
                 _holdWait.Stop();
             RunEvent("mouseLeave");
@@ -1301,13 +1645,14 @@ namespace Mascot
             base.OnMouseDown(e);
             if (e.Button == MouseButtons.Right)
             {
-                HideSay();
+                if (!_sayHold)
+                    HideSay();
                 RunEvent("rightClick");
                 return;
             }
             if (e.Button == MouseButtons.Middle)
             {
-                RunEvent("middleClick");
+                ArmMiddle();
                 return;
             }
             if (e.Button != MouseButtons.Left)
@@ -1339,6 +1684,8 @@ namespace Mascot
             base.OnMouseUp(e);
             if (_dragging && e.Button == MouseButtons.Left)
                 EndDrag();
+            if (e.Button == MouseButtons.Middle)
+                EndMiddle();
         }
 
         protected override void WndProc(ref Message m)
@@ -1371,6 +1718,30 @@ namespace Mascot
                 return;
             }
             base.WndProc(ref m);
+        }
+
+        DropPad _pad;
+        bool _padBroken;
+
+        void ParkPad()
+        {
+            if (_padBroken)
+                return;
+            try
+            {
+                if (_pad == null || _pad.IsDisposed)
+                    _pad = new DropPad(this);
+                if (!_pad.Visible)
+                    _pad.Show();
+                _pad.Park(_winX, _winY, Motion.Width, Motion.Height, _frame.Alpha);
+            }
+            catch (Exception ex)
+            {
+                _padBroken = true;
+                Friends.Log("drop pad " + ex.Message);
+            }
+            if (_say != null && _say.Visible && _say.IsHandleCreated)
+                SetWindowPos(_say.Handle, HWND_TOPMOST, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0010);
         }
 
         void BuildTray()
@@ -1487,7 +1858,7 @@ namespace Mascot
                     DragAtCursor();
             }
 
-            if (!_dragging && t >= _settleUntil)
+            if (!_dragging && !_midDown && t >= _settleUntil)
             {
                 if (t >= _nextTurn)
                 {
@@ -1530,11 +1901,21 @@ namespace Mascot
                 _timers.Follow();
             if (_say != null && _say.Visible)
             {
-                if (t > _sayUntil)
-                    HideSay();
+            if (t > _sayUntil)
+            {
+                bool note = _sayHold;
+                _sayHold = false;
+                HideSay();
+                if (note && _noteQueue.Count > 0)
+                {
+                    HeldNote next = _noteQueue.Dequeue();
+                    ShowNote(next.Text, next.Clip, next.Open);
+                }
+            }
                 else
                     ParkSay();
             }
+            ParkPad();
         }
 
         void BiasFromEdges()
@@ -1712,13 +2093,87 @@ namespace Mascot
             "Need anything?", "*waves*"
         };
 
+        void EnsureSay()
+        {
+            if (_say != null)
+                return;
+            _say = new SayBubble();
+            _say.Copied += delegate
+            {
+                _sayHold = false;
+                if (_noteQueue.Count > 0)
+                {
+                    HeldNote next = _noteQueue.Dequeue();
+                    ShowNote(next.Text, next.Clip, next.Open);
+                }
+            };
+        }
+
         void ShowSay(string text)
         {
-            if (_say == null)
-                _say = new SayBubble();
+            if (_sayHold)
+                return;
+            EnsureSay();
             _say.Apply(Skin.Load());
             _sayUntil = Now + 2.4;
             _say.Say(text, 0, 0);
+            if (_timers != null)
+                _timers.Follow();
+            ParkSay();
+        }
+
+        public void ShowLine(string text)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<string>(ShowLine), text);
+                return;
+            }
+            ShowSay(text);
+        }
+
+        public void DeliverNote(string text)
+        {
+            DeliverCard(text, text, null);
+        }
+
+        public void DeliverCard(string text, string clip, string openPath)
+        {
+            if (InvokeRequired)
+            {
+                BeginInvoke(new Action<string, string, string>(DeliverCard), text, clip, openPath);
+                return;
+            }
+            if (!string.IsNullOrEmpty(openPath))
+            {
+                try
+                {
+                    SayBubble.CopyFile(openPath);
+                }
+                catch (Exception ex)
+                {
+                    Friends.Log("clipboard " + ex.Message);
+                }
+            }
+            if (_sayHold)
+            {
+                HeldNote item = new HeldNote();
+                item.Text = text;
+                item.Clip = clip;
+                item.Open = openPath;
+                _noteQueue.Enqueue(item);
+                return;
+            }
+            ShowNote(text, clip, openPath);
+        }
+
+        void ShowNote(string text, string clip, string openPath)
+        {
+            EnsureSay();
+            _say.ApplyNote(Skin.Load());
+            _sayHold = true;
+            _sayUntil = Now + 40;
+            _say.Note(text, clip, openPath);
             if (_timers != null)
                 _timers.Follow();
             ParkSay();
@@ -1731,6 +2186,44 @@ namespace Mascot
             if (_timers != null && _timers.Visible)
                 y = _timers.Top - 8;
             _say.Place(body.Left + body.Width / 2, y);
+        }
+
+        void ArmMiddle()
+        {
+            _midDown = true;
+            _midFired = false;
+            Capture = true;
+            if (_midWait == null)
+            {
+                _midWait = new System.Windows.Forms.Timer();
+                _midWait.Interval = 550;
+                _midWait.Tick += delegate
+                {
+                    _midWait.Stop();
+                    if (!_midDown)
+                        return;
+                    _midDown = false;
+                    _midFired = true;
+                    Capture = false;
+                    Friends.Open(this);
+                };
+            }
+            _midWait.Stop();
+            _midWait.Start();
+        }
+
+        void EndMiddle()
+        {
+            if (!_midDown && !_midFired)
+                return;
+            bool fire = _midDown && !_midFired;
+            _midDown = false;
+            _midFired = false;
+            Capture = false;
+            if (_midWait != null)
+                _midWait.Stop();
+            if (fire)
+                RunEvent("middleClick");
         }
 
         void ArmHold()
@@ -2736,6 +3229,91 @@ namespace Mascot
 
         [DllImport("user32.dll")]
         static extern bool GetCursorPos(out POINT lpPoint);
+
+        delegate IntPtr HookProc(int nCode, IntPtr wParam, IntPtr lParam);
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct KBDLL
+        {
+            public uint vkCode;
+            public uint scanCode;
+            public uint flags;
+            public uint time;
+            public IntPtr extra;
+        }
+
+        void ArmKeys()
+        {
+            _keys = this;
+            if (_keyHook != IntPtr.Zero)
+                return;
+            _keyProc = KeyHook;
+            _keyHook = SetWindowsHookEx(13, _keyProc, IntPtr.Zero, 0);
+            if (_keyHook == IntPtr.Zero)
+                _keyHook = SetWindowsHookEx(13, _keyProc, GetModuleHandle(null), 0);
+        }
+
+        static void DisarmKeys()
+        {
+            if (_keyHook != IntPtr.Zero)
+            {
+                UnhookWindowsHookEx(_keyHook);
+                _keyHook = IntPtr.Zero;
+            }
+            _keys = null;
+            _lctrl = false;
+            _rctrl = false;
+            _mDown = false;
+        }
+
+        static IntPtr KeyHook(int nCode, IntPtr wParam, IntPtr lParam)
+        {
+            if (nCode >= 0 && _keys != null && lParam != IntPtr.Zero)
+            {
+                int msg = wParam.ToInt32();
+                bool down = msg == 0x0100 || msg == 0x0104;
+                bool up = msg == 0x0101 || msg == 0x0105;
+                KBDLL info = (KBDLL)Marshal.PtrToStructure(lParam, typeof(KBDLL));
+                if (info.vkCode == 0xA2)
+                    _lctrl = down;
+                else if (info.vkCode == 0xA3)
+                    _rctrl = down;
+                bool ctrl = _lctrl || _rctrl;
+                if (info.vkCode == 0x4D && ctrl && !OtherMods())
+                {
+                    if (down && !_mDown)
+                    {
+                        _mDown = true;
+                        PetForm pet = _keys;
+                        pet.BeginInvoke(new Action(delegate { Friends.Prompt(pet); }));
+                    }
+                    if (up)
+                        _mDown = false;
+                    return (IntPtr)1;
+                }
+            }
+            return CallNextHookEx(_keyHook, nCode, wParam, lParam);
+        }
+
+        static bool OtherMods()
+        {
+            return (GetAsyncKeyState(0x10) & 0x8000) != 0
+                || (GetAsyncKeyState(0x12) & 0x8000) != 0
+                || (GetAsyncKeyState(0x5B) & 0x8000) != 0
+                || (GetAsyncKeyState(0x5C) & 0x8000) != 0;
+        }
+
+        [DllImport("kernel32.dll", CharSet = CharSet.Auto)]
+        static extern IntPtr GetModuleHandle(string name);
+
+        [DllImport("user32.dll", SetLastError = true)]
+        static extern IntPtr SetWindowsHookEx(int idHook, HookProc lpfn, IntPtr hMod, uint dwThreadId);
+
+        [DllImport("user32.dll")]
+        static extern bool UnhookWindowsHookEx(IntPtr hhk);
+
+        [DllImport("user32.dll")]
+        static extern IntPtr CallNextHookEx(IntPtr hhk, int nCode, IntPtr wParam, IntPtr lParam);
 
         [DllImport("user32.dll")]
         static extern short GetAsyncKeyState(int vKey);
