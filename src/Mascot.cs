@@ -41,6 +41,9 @@ namespace Mascot
                 int pals = Friends.SelfCheck();
                 if (pals != 0)
                     return pals;
+                int thumb = SayBubble.SelfCheck();
+                if (thumb != 0)
+                    return thumb;
                 try
                 {
                     return GlbMesh.SelfCheck(AvatarConfig.Load().ModelPath);
@@ -978,6 +981,7 @@ namespace Mascot
         string _text = "";
         string _clip;
         string _open;
+        Bitmap _thumb;
         bool _card;
         Font _font = new Font("Segoe UI", 9.5f);
         Color _bg = Color.FromArgb(255, 32, 36, 46);
@@ -1063,6 +1067,7 @@ namespace Mascot
             _open = null;
             _clip = copy ? text : null;
             _text = text ?? "";
+            SetThumb(null);
             ShowText(copy);
         }
 
@@ -1072,7 +1077,98 @@ namespace Mascot
             _open = openPath;
             _clip = string.IsNullOrEmpty(openPath) ? clip : null;
             _text = text ?? "";
+            SetThumb(string.IsNullOrEmpty(openPath) ? null : LoadThumb(openPath));
             ShowText(true);
+        }
+
+        // ponytail: System.Drawing images only. Shell thumbs if pdf/video need a preview.
+        static Bitmap LoadThumb(string path)
+        {
+            string ext = Path.GetExtension(path ?? "").ToLowerInvariant();
+            if (ext != ".png" && ext != ".jpg" && ext != ".jpeg" && ext != ".gif" && ext != ".bmp" && ext != ".tif" && ext != ".tiff" && ext != ".ico")
+                return null;
+            Bitmap bmp = null;
+            try
+            {
+                using (Image src = Image.FromFile(path))
+                {
+                    int w;
+                    int h;
+                    FitThumb(src.Width, src.Height, 150, out w, out h);
+                    bmp = new Bitmap(w, h, PixelFormat.Format32bppArgb);
+                    using (Graphics g = Graphics.FromImage(bmp))
+                    {
+                        g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                        g.DrawImage(src, 0, 0, w, h);
+                    }
+                    Bitmap done = bmp;
+                    bmp = null;
+                    return done;
+                }
+            }
+            catch
+            {
+                if (bmp != null)
+                    bmp.Dispose();
+                return null;
+            }
+        }
+
+        public static void FitThumb(int sw, int sh, int max, out int w, out int h)
+        {
+            w = Math.Max(1, sw);
+            h = Math.Max(1, sh);
+            if (w <= max && h <= max)
+                return;
+            double s = Math.Min(max / (double)w, max / (double)h);
+            w = Math.Max(1, (int)Math.Round(w * s));
+            h = Math.Max(1, (int)Math.Round(h * s));
+        }
+
+        public static int SelfCheck()
+        {
+            int w;
+            int h;
+            FitThumb(300, 100, 150, out w, out h);
+            if (w != 150 || h != 50)
+                return FailThumb("wide");
+            FitThumb(100, 80, 150, out w, out h);
+            if (w != 100 || h != 80)
+                return FailThumb("small");
+            FitThumb(10, 400, 150, out w, out h);
+            if (w != 4 || h != 150)
+                return FailThumb("tall");
+            string path = Path.Combine(Path.GetTempPath(), "mascot-thumb-check.png");
+            try
+            {
+                using (Bitmap src = new Bitmap(300, 100, PixelFormat.Format32bppArgb))
+                    src.Save(path, ImageFormat.Png);
+                using (Bitmap got = LoadThumb(path))
+                {
+                    if (got == null || got.Width != 150 || got.Height != 50)
+                        return FailThumb("png");
+                }
+                if (LoadThumb(Path.ChangeExtension(path, ".txt")) != null)
+                    return FailThumb("skip");
+            }
+            finally
+            {
+                try { File.Delete(path); } catch { }
+            }
+            return 0;
+        }
+
+        static int FailThumb(string why)
+        {
+            Console.Error.WriteLine(why);
+            return 61;
+        }
+
+        void SetThumb(Bitmap next)
+        {
+            if (_thumb != null)
+                _thumb.Dispose();
+            _thumb = next;
         }
 
         void ShowText(bool wrap)
@@ -1088,9 +1184,13 @@ namespace Mascot
             else
                 flags |= TextFormatFlags.SingleLine;
             Size sz = TextRenderer.MeasureText(_text, _font, new Size(maxW, 800), flags);
-            int w = wrap ? Math.Max(sz.Width, _card ? 160 : 120) : sz.Width;
+            int picW = _thumb == null ? 0 : _thumb.Width;
+            int picH = _thumb == null ? 0 : _thumb.Height;
+            int gap = _thumb == null ? 0 : 6;
+            int inner = Math.Max(sz.Width, picW);
+            int w = wrap ? Math.Max(inner, _card ? 160 : 120) : inner;
             int tail = _card ? 0 : 12;
-            ClientSize = new Size(w + _padL + _padR + 4, sz.Height + _padT + _padB + tail);
+            ClientSize = new Size(w + _padL + _padR + 4, sz.Height + picH + gap + _padT + _padB + tail);
             Place(0, 0);
             Invalidate();
             if (!Visible)
@@ -1136,7 +1236,11 @@ namespace Mascot
                 KeyMagenta(bmp);
                 e.Graphics.DrawImage(bmp, 0, 0);
             }
-            Rectangle text = new Rectangle(_padL, _padT, w - _padL - _padR, h - tail - _padT - _padB);
+            int picH = _thumb == null ? 0 : _thumb.Height;
+            int gap = _thumb == null ? 0 : 6;
+            if (_thumb != null)
+                e.Graphics.DrawImage(_thumb, (w - _thumb.Width) / 2, _padT);
+            Rectangle text = new Rectangle(_padL, _padT + picH + gap, w - _padL - _padR, Math.Max(1, h - tail - _padT - _padB - picH - gap));
             TextFormatFlags flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.NoPrefix;
             if (_clip != null || _card)
                 flags |= TextFormatFlags.WordBreak | TextFormatFlags.TextBoxControl;
@@ -1209,7 +1313,10 @@ namespace Mascot
         protected override void Dispose(bool disposing)
         {
             if (disposing)
+            {
                 _font.Dispose();
+                SetThumb(null);
+            }
             base.Dispose(disposing);
         }
     }
@@ -2155,11 +2262,6 @@ namespace Mascot
             ShowSay(text);
         }
 
-        public void DeliverNote(string text)
-        {
-            DeliverCard(text, text, null);
-        }
-
         public void DeliverCard(string text, string clip, string openPath)
         {
             if (InvokeRequired)
@@ -2195,7 +2297,7 @@ namespace Mascot
             EnsureSay();
             _say.ApplyNote(Skin.Load());
             _sayHold = true;
-            _sayUntil = Now + 40;
+            _sayUntil = Now + (string.IsNullOrEmpty(openPath) ? 15 : 40);
             _say.Note(text, clip, openPath);
             if (_timers != null)
                 _timers.Follow();

@@ -195,6 +195,8 @@ namespace Mascot
                 return Fail("packet m");
             if (!ReadPacket("7041", out kind, out pin, out from, out to, out text) || kind != "P" || pin != "7041")
                 return Fail("packet raw");
+            if (NoteShown("userA", "Hello") != "userA: Hello" || NoteShown("", "Hello") != "Hello")
+                return Fail("label");
             if (SafeName("..\\..\\notes.txt") != "notes.txt" || SafeName("hi there!.txt") != "hi there.txt")
                 return Fail("name");
             if (CleanPin("Bob_1") != "bob_1" || CleanPin("ab") != "" || CleanPin("hey") != "hey")
@@ -770,7 +772,7 @@ namespace Mascot
                             FriendNote note = res.messages[i];
                             if (note == null || string.IsNullOrEmpty(note.text))
                                 continue;
-                            PostNote(note.text);
+                            PostNote(note.from, note.text);
                         }
                     }
                 }
@@ -794,7 +796,7 @@ namespace Mascot
                             FriendNote note = hello.messages[i];
                             if (note == null || string.IsNullOrEmpty(note.text))
                                 continue;
-                            PostNote(note.text);
+                            PostNote(note.from, note.text);
                         }
                     }
                     res = Call("/send", new FriendWire { token = _book.token, to = to, text = text });
@@ -1026,7 +1028,7 @@ namespace Mascot
                             if (_book != null && msgTo == _book.pin)
                             {
                                 Log("got message from " + msgFrom + " via " + remote.Address + ":" + remote.Port);
-                                PostNote(msgText);
+                                PostNote(msgFrom, msgText);
                             }
                             continue;
                         }
@@ -1405,9 +1407,18 @@ namespace Mascot
             Post(delegate { _pet.ShowLine(line); });
         }
 
-        static void PostNote(string line)
+        static string NoteShown(string from, string text)
         {
-            Post(delegate { _pet.DeliverNote(line); });
+            text = text ?? "";
+            if (string.IsNullOrEmpty(from))
+                return text;
+            return from + ": " + text;
+        }
+
+        static void PostNote(string from, string text)
+        {
+            string shown = NoteShown(from, text);
+            Post(delegate { _pet.DeliverCard(shown, text ?? "", null); });
         }
 
         static void PostFile(string name, string path)
