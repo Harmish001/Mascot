@@ -1260,6 +1260,12 @@ namespace Mascot
 
             public void Park(int x, int y, int w, int h, byte[] alpha)
             {
+                if (!_pet._running)
+                {
+                    if (Visible)
+                        Hide();
+                    return;
+                }
                 if (w < 1) w = 1;
                 if (h < 1) h = 1;
                 int now = Environment.TickCount;
@@ -1276,6 +1282,8 @@ namespace Mascot
             protected override void OnMouseEnter(EventArgs e)
             {
                 base.OnMouseEnter(e);
+                if (!_pet._running)
+                    return;
                 _pet.OnMouseEnter(e);
             }
 
@@ -1625,7 +1633,7 @@ namespace Mascot
         protected override void OnMouseEnter(EventArgs e)
         {
             base.OnMouseEnter(e);
-            if (_dragging)
+            if (!_running || _dragging)
                 return;
             RunEvent("hover");
         }
@@ -1798,7 +1806,22 @@ namespace Mascot
         {
             _running = false;
             _timer.Stop();
+            _sayHold = false;
+            if (_clickWait != null)
+                _clickWait.Stop();
+            if (_holdWait != null)
+                _holdWait.Stop();
+            HideSay();
+            if (_pad != null && !_pad.IsDisposed)
+            {
+                _pad.Capture = false;
+                _pad.Hide();
+                if (_pad.IsHandleCreated)
+                    SetWindowPos(_pad.Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0080 | 0x0010);
+            }
             Hide();
+            if (IsHandleCreated)
+                SetWindowPos(Handle, IntPtr.Zero, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0080 | 0x0010);
             SyncMenu();
         }
 
@@ -2286,6 +2309,8 @@ namespace Mascot
 
         void RunEvent(string name)
         {
+            if (!_running)
+                return;
             PetEvent ev = PetEvent.Find(name);
             if (ev == null)
                 return;

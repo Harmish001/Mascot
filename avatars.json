@@ -18,7 +18,7 @@
 		"command": "3d avatars/fish.glb",
 		"yawOffset": 90,
 		"turn": 180,
-		"scale": 0.7
+		"scale": 0.6
 	},
 	{
 		"label": "Panda 3D",
@@ -37,20 +37,12 @@
 		"scale": 0.75
 	},
 	{
-		"label": "dino",
-		"action": "avatar",
-		"command": "3d avatars/dino.glb",
-		"yawOffset": 0,
-		"turn": 180,
-		"scale": 0.75
-	},
-	{
 		"label": "ghost",
 		"action": "avatar",
 		"command": "3d avatars/ghost.glb",
 		"yawOffset": 245,
 		"turn": 270,
-		"scale": 0.75
+		"scale": 0.55
 	},
 	{
 		"label": "robot",
@@ -59,5 +51,29 @@
 		"yawOffset": 0,
 		"turn": 270,
 		"scale": 0.65
+	},
+	{
+		"label": "hamster",
+		"action": "avatar",
+		"command": "3d avatars/hamster.glb",
+		"yawOffset": 0,
+		"turn": 270,
+		"scale": 0.5
+	},
+	{
+		"label": "shark",
+		"action": "avatar",
+		"command": "3d avatars/shark.glb",
+		"yawOffset": 0,
+		"turn": 270,
+		"scale": 0.7
+	},
+	{
+		"label": "star",
+		"action": "avatar",
+		"command": "3d avatars/star.glb",
+		"yawOffset": 0,
+		"turn": 270,
+		"scale": 0.5
 	}
 ]

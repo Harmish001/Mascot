@@ -166,6 +166,28 @@ namespace Mascot
                 if (moved < 30)
                     return Fail("clip did not move");
             }
+            string gil = Path.Combine(Path.GetDirectoryName(path), "cute_gil.glb");
+            if (File.Exists(gil))
+            {
+                GlbMesh cute = Load(gil);
+                float hx = cute.MaxX - cute.MinX;
+                float hy = cute.MaxY - cute.MinY;
+                float hz = cute.MaxZ - cute.MinZ;
+                if (hy < hx || hy < hz)
+                    return Fail("cute_gil lying down");
+                int blue = 0;
+                int samples = 0;
+                int step = Math.Max(1, (cute.TexW * cute.TexH) / 200);
+                for (int i = 0; i < cute.TexW * cute.TexH; i += step)
+                {
+                    int o = i * 4;
+                    samples++;
+                    if (cute.Rgba[o + 2] > cute.Rgba[o] + 30 && cute.Rgba[o + 2] > cute.Rgba[o + 1] + 30)
+                        blue++;
+                }
+                if (blue * 2 > samples)
+                    return Fail("cute_gil normal map");
+            }
             Console.WriteLine("mesh ok " + mesh.VertexCount + (mesh.Skinned ? " skinned" : ""));
             return 0;
         }
@@ -242,14 +264,45 @@ namespace Mascot
                 mesh.FitClip();
             }
             else
+            {
+                BakeRest(mesh, root);
                 Bounds(mesh);
+            }
             return mesh;
+        }
+
+        static int BaseImage(Dictionary<string, object> root)
+        {
+            if (!root.ContainsKey("images"))
+                return -1;
+            Dictionary<string, object> prim = Prim(root);
+            if (!prim.ContainsKey("material") || !root.ContainsKey("materials") || !root.ContainsKey("textures"))
+                return 0;
+            object[] materials = AsArray(root["materials"]);
+            Dictionary<string, object> mat = (Dictionary<string, object>)materials[Convert.ToInt32(prim["material"])];
+            if (!mat.ContainsKey("pbrMetallicRoughness"))
+                return 0;
+            Dictionary<string, object> pbr = (Dictionary<string, object>)mat["pbrMetallicRoughness"];
+            if (!pbr.ContainsKey("baseColorTexture"))
+                return -1;
+            Dictionary<string, object> info = (Dictionary<string, object>)pbr["baseColorTexture"];
+            object[] textures = AsArray(root["textures"]);
+            Dictionary<string, object> tex = (Dictionary<string, object>)textures[Convert.ToInt32(info["index"])];
+            return Convert.ToInt32(tex["source"]);
         }
 
         static void LoadTexture(GlbMesh mesh, Dictionary<string, object> root, byte[] bin, string dir)
         {
+            int imageIndex = BaseImage(root);
+            if (imageIndex < 0)
+            {
+                mesh.TexW = 1;
+                mesh.TexH = 1;
+                mesh.Rgba = new byte[] { 255, 255, 255, 255 };
+                return;
+            }
             object[] images = AsArray(root["images"]);
-            Dictionary<string, object> image = (Dictionary<string, object>)images[0];
+            Dictionary<string, object> image = (Dictionary<string, object>)images[imageIndex];
             Bitmap src;
             if (image.ContainsKey("uri"))
             {
@@ -340,6 +393,103 @@ namespace Mascot
             mesh.MaxY = maxY;
             mesh.MinZ = minZ;
             mesh.MaxZ = maxZ;
+        }
+
+        // ponytail: first node that uses mesh 0. A second instance of the same mesh is dropped.
+        static void BakeRest(GlbMesh mesh, Dictionary<string, object> root)
+        {
+            if (!root.ContainsKey("nodes"))
+                return;
+            object[] nodes = AsArray(root["nodes"]);
+            int meshNode = -1;
+            for (int i = 0; i < nodes.Length; i++)
+            {
+                Dictionary<string, object> node = (Dictionary<string, object>)nodes[i];
+                if (node.ContainsKey("mesh") && Convert.ToInt32(node["mesh"]) == 0)
+                {
+                    meshNode = i;
+                    break;
+                }
+            }
+            if (meshNode < 0)
+                return;
+            int n = nodes.Length;
+            int[] parent = new int[n];
+            for (int i = 0; i < n; i++)
+                parent[i] = -1;
+            for (int i = 0; i < n; i++)
+            {
+                Dictionary<string, object> node = (Dictionary<string, object>)nodes[i];
+                if (!node.ContainsKey("children"))
+                    continue;
+                object[] kids = AsArray(node["children"]);
+                for (int c = 0; c < kids.Length; c++)
+                    parent[Convert.ToInt32(kids[c])] = i;
+            }
+            int[] chain = new int[n];
+            int depth = 0;
+            for (int i = meshNode; i >= 0 && depth < n; i = parent[i])
+                chain[depth++] = i;
+            float[] world = new float[16];
+            float[] local = new float[16];
+            float[] acc = new float[16];
+            Buffer.BlockCopy(Ident, 0, world, 0, 64);
+            for (int s = depth - 1; s >= 0; s--)
+            {
+                NodeMatrix((Dictionary<string, object>)nodes[chain[s]], local);
+                Mul(world, 0, local, 0, acc, 0);
+                Buffer.BlockCopy(acc, 0, world, 0, 64);
+            }
+            Apply(mesh.Positions, world, true);
+            Apply(mesh.Normals, world, false);
+        }
+
+        static void NodeMatrix(Dictionary<string, object> node, float[] m)
+        {
+            if (node.ContainsKey("matrix"))
+            {
+                object[] mat = AsArray(node["matrix"]);
+                for (int k = 0; k < 16; k++)
+                    m[k] = Convert.ToSingle(mat[k]);
+                return;
+            }
+            float tx = 0f, ty = 0f, tz = 0f, qx = 0f, qy = 0f, qz = 0f, qw = 1f, sx = 1f, sy = 1f, sz = 1f;
+            Read3(node, "translation", ref tx, ref ty, ref tz);
+            Read4(node, "rotation", ref qx, ref qy, ref qz, ref qw);
+            Read3(node, "scale", ref sx, ref sy, ref sz);
+            FromTRS(tx, ty, tz, qx, qy, qz, qw, sx, sy, sz, m);
+        }
+
+        static void Apply(float[] p, float[] m, bool point)
+        {
+            for (int i = 0; i < p.Length; i += 3)
+            {
+                float x = p[i];
+                float y = p[i + 1];
+                float z = p[i + 2];
+                float nx = m[0] * x + m[4] * y + m[8] * z;
+                float ny = m[1] * x + m[5] * y + m[9] * z;
+                float nz = m[2] * x + m[6] * y + m[10] * z;
+                if (point)
+                {
+                    p[i] = nx + m[12];
+                    p[i + 1] = ny + m[13];
+                    p[i + 2] = nz + m[14];
+                }
+                else
+                {
+                    float len = (float)Math.Sqrt(nx * nx + ny * ny + nz * nz);
+                    if (len > 1e-8f)
+                    {
+                        nx /= len;
+                        ny /= len;
+                        nz /= len;
+                    }
+                    p[i] = nx;
+                    p[i + 1] = ny;
+                    p[i + 2] = nz;
+                }
+            }
         }
 
         static Dictionary<string, object> Prim(Dictionary<string, object> root)

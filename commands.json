@@ -1,11 +1,7 @@
 [
 	{ "label": "Timers", "action": "timers" },
 	{
-		"label": "myhub-v3",
-		"command": "wt.exe powershell -NoExit -Command myhub"
-	},
-	{
-		"label": "vibe-admin",
-		"command": "wt.exe powershell -NoExit -Command system-settings"
+		"label": "terminal",
+		"command": "wt.exe"
 	}
 ]

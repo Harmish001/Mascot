@@ -222,6 +222,21 @@ namespace Mascot
             byte[] joined = JoinFile(new string[] { Convert.ToBase64String(Encoding.UTF8.GetBytes("hello ")), Convert.ToBase64String(Encoding.UTF8.GetBytes("file")) });
             if (joined == null || Encoding.UTF8.GetString(joined) != "hello file")
                 return Fail("join");
+            if (!CameOnline(false, 0, 1000) || CameOnline(true, 1000, 1000 + TtlMs))
+                return Fail("arrive");
+            if (!CameOnline(true, 1000, 1000 + TtlMs + 1))
+                return Fail("return");
+            if (Listed(new string[] { "7194" }, "7041") || !Listed(new string[] { "7194" }, "7194"))
+                return Fail("pal");
+            string[] all = SendTargets("mine", "", new string[] { "aaaa", "bbbb" });
+            if (all.Length != 2 || all[0] != "aaaa" || all[1] != "bbbb")
+                return Fail("all");
+            string[] one = SendTargets("mine", "bbbb", new string[] { "aaaa", "bbbb" });
+            if (one.Length != 1 || one[0] != "bbbb")
+                return Fail("one");
+            string[] skip = SendTargets("mine", "", new string[] { "mine", "aaaa" });
+            if (skip.Length != 1 || skip[0] != "aaaa")
+                return Fail("skip me");
             return 0;
         }
 
@@ -461,6 +476,8 @@ namespace Mascot
             y += row + 12;
             RoundButton remove = form.Chip("REMOVE", false);
             remove.SetBounds(x, y, 100, row);
+            RoundButton all = form.Chip("ALL", false);
+            all.SetBounds(x + 108, y, 72, row);
             y += row + 8;
             Label status = form.Lab(TargetLine());
             status.SetBounds(x, y, inner, form.LabelH * 2);
@@ -485,14 +502,13 @@ namespace Mascot
                     return;
                 }
                 _book.friends = Normalize(_book.friends, to);
-                _book.friend = to;
                 Save(_book);
                 pal.Text = "";
                 FillFriends(list);
                 status.Text = TargetLine();
                 status.ForeColor = form.Mute;
                 if (_pet != null)
-                    _pet.ShowLine("Sending to " + to + ". Ctrl+M to message.");
+                    _pet.ShowLine("Added " + to);
             };
             remove.Click += delegate
             {
@@ -507,7 +523,7 @@ namespace Mascot
                 }
                 _book.friends = keep.ToArray();
                 if (_book.friend == gone)
-                    _book.friend = keep.Count > 0 ? keep[0] : "";
+                    _book.friend = "";
                 Save(_book);
                 FillFriends(list);
                 status.Text = TargetLine();
@@ -543,7 +559,16 @@ namespace Mascot
             form.Controls.Add(palLabel);
             form.Controls.Add(pal);
             form.Controls.Add(connect);
+            all.Click += delegate
+            {
+                _book.friend = "";
+                Save(_book);
+                list.ClearSelected();
+                status.Text = TargetLine();
+                status.ForeColor = form.Mute;
+            };
             form.Controls.Add(remove);
+            form.Controls.Add(all);
             form.Controls.Add(status);
             form.AcceptButton = connect;
             form.Fit(y + form.PadB);
@@ -584,10 +609,11 @@ namespace Mascot
             who.Font = form.Font;
             who.SetBounds(x + 6, y + 4, inner - 12, form.BoxH);
             form.Track(who);
+            who.Items.Add(AllFriends);
             for (int i = 0; i < _book.friends.Length; i++)
                 who.Items.Add(_book.friends[i]);
-            int pick = _book.friend == null ? -1 : who.Items.IndexOf(_book.friend);
-            who.SelectedIndex = pick < 0 ? 0 : pick;
+            int pick = who.Items.IndexOf(CleanPin(_book.friend));
+            who.SelectedIndex = pick < 1 ? 0 : pick;
             y += form.BoxH + 12;
             Label msgLabel = form.Lab("MESSAGE");
             msgLabel.SetBounds(x, y, inner, form.LabelH);
@@ -603,27 +629,19 @@ namespace Mascot
             y += form.BoxH;
             send.Click += delegate
             {
-                string to = who.SelectedItem as string;
-                to = CleanPin(to);
-                if (to.Length == 0)
+                if (!RememberTarget(who.SelectedItem as string))
                 {
                     status.Text = "Pick a friend";
                     status.ForeColor = form.Alert;
                     return;
                 }
-                _book.friend = to;
-                Save(_book);
-                Push(form, send, status, msg, to);
+                Push(form, send, status, msg);
             };
             form.Controls.Add(toLabel);
             form.Controls.Add(who);
             who.SelectedIndexChanged += delegate
             {
-                string to = CleanPin(who.SelectedItem as string);
-                if (to.Length == 0)
-                    return;
-                _book.friend = to;
-                Save(_book);
+                RememberTarget(who.SelectedItem as string);
             };
             form.Controls.Add(msgLabel);
             form.Controls.Add(msg);
@@ -639,7 +657,25 @@ namespace Mascot
             TakeFocus(form, msg);
         }
 
-        static void Push(Form form, Button send, Label status, TextBox msg, string to)
+        const string AllFriends = "All friends";
+
+        static bool RememberTarget(string raw)
+        {
+            if (raw == AllFriends)
+            {
+                _book.friend = "";
+                Save(_book);
+                return true;
+            }
+            string to = CleanPin(raw);
+            if (to.Length == 0)
+                return false;
+            _book.friend = to;
+            Save(_book);
+            return true;
+        }
+
+        static void Push(Form form, Button send, Label status, TextBox msg)
         {
             FriendSheet sheet = form as FriendSheet;
             string text = msg.Text == null ? "" : msg.Text.Trim();
@@ -657,14 +693,35 @@ namespace Mascot
                     status.ForeColor = sheet.Alert;
                 return;
             }
+            string[] targets = SendTargets(_book.pin, _book.friend, _book.friends);
+            if (targets.Length == 0)
+            {
+                status.Text = "Add a friend";
+                if (sheet != null)
+                    status.ForeColor = sheet.Alert;
+                return;
+            }
             send.Enabled = false;
             status.Text = "Sending…";
             if (sheet != null)
                 status.ForeColor = sheet.Mute;
             ThreadPool.QueueUserWorkItem(delegate
             {
-                FriendWire res = SendText(to, text);
-                string line = res == null ? "Relay unreachable" : (res.ok ? "Sent" : (res.error ?? "Failed"));
+                int ok = 0;
+                string fail = "Failed";
+                for (int i = 0; i < targets.Length; i++)
+                {
+                    FriendWire res = SendText(targets[i], text);
+                    if (res != null && res.ok)
+                        ok++;
+                    else if (res == null)
+                        fail = "Relay unreachable";
+                    else if (!string.IsNullOrEmpty(res.error))
+                        fail = res.error;
+                }
+                string line = ok == targets.Length
+                    ? (targets.Length == 1 ? "Sent" : "Sent to all")
+                    : (ok == 0 ? fail : "Sent " + ok + " of " + targets.Length);
                 if (form.IsDisposed)
                     return;
                 form.BeginInvoke(new Action(delegate
@@ -672,8 +729,8 @@ namespace Mascot
                     send.Enabled = true;
                     status.Text = line;
                     if (sheet != null)
-                        status.ForeColor = (res != null && res.ok) ? sheet.Mute : sheet.Alert;
-                    if (res != null && res.ok)
+                        status.ForeColor = ok == targets.Length ? sheet.Mute : sheet.Alert;
+                    if (ok > 0)
                     {
                         msg.Text = "";
                         TakeFocus(form, msg);
@@ -783,6 +840,7 @@ namespace Mascot
         static readonly object _ackLock = new object();
         static readonly ManualResetEvent _ackHit = new ManualResetEvent(false);
         static string _ackName = "";
+        static string _ackFrom = "";
         static int _ackIndex = -1;
 
         static int ChunkCount(int len)
@@ -809,9 +867,15 @@ namespace Mascot
                 PostLine("Drop a file");
                 return;
             }
-            if (_book == null || CleanPin(_book.friend).Length == 0)
+            if (_book == null)
             {
-                PostLine("Connect a friend first");
+                PostLine("Add a friend first");
+                return;
+            }
+            string[] targets = SendTargets(_book.pin, _book.friend, _book.friends);
+            if (targets.Length == 0)
+            {
+                PostLine("Add a friend first");
                 return;
             }
             long size;
@@ -830,14 +894,6 @@ namespace Mascot
                 PostLine("Max is 32 MB");
                 return;
             }
-            string to = CleanPin(_book.friend);
-            IPEndPoint end = PeerEnd(to);
-            if (end == null)
-            {
-                Log("no beacon for file " + to);
-                PostLine("Friend offline");
-                return;
-            }
             byte[] raw;
             try
             {
@@ -851,42 +907,60 @@ namespace Mascot
             }
             string name = SafeName(Path.GetFileName(path));
             int total = ChunkCount(raw.Length);
-            Log("file drop " + name + " bytes=" + raw.Length);
+            Log("file drop " + name + " bytes=" + raw.Length + " to=" + targets.Length);
             PostLine("Sending " + name);
+            int sent = 0;
             lock (_fileSend)
             {
-                for (int i = 0; i < total; i++)
+                for (int t = 0; t < targets.Length; t++)
                 {
-                    int n = Math.Min(ChunkBytes, raw.Length - i * ChunkBytes);
-                    string b64 = Convert.ToBase64String(raw, i * ChunkBytes, n);
-                    byte[] buf = Encoding.UTF8.GetBytes(FilePacket(_book.pin, to, name, i, total, b64));
-                    bool ok = false;
-                    for (int attempt = 0; attempt < 6; attempt++)
+                    string to = targets[t];
+                    IPEndPoint end = PeerEnd(to);
+                    if (end == null)
                     {
-                        lock (_ackLock)
-                        {
-                            _ackName = name;
-                            _ackIndex = i;
-                            _ackHit.Reset();
-                        }
-                        if (!UdpSend(end, buf))
-                            break;
-                        if (_ackHit.WaitOne(400))
-                        {
-                            ok = true;
-                            break;
-                        }
+                        Log("no beacon for file " + to);
+                        continue;
                     }
-                    if (!ok)
+                    bool ok = true;
+                    for (int i = 0; i < total && ok; i++)
                     {
-                        Log("file failed " + name + " chunk " + i + " no ack " + end.Address + ":" + end.Port);
-                        PostLine("No answer from friend. Update their mascot.exe");
-                        return;
+                        int n = Math.Min(ChunkBytes, raw.Length - i * ChunkBytes);
+                        string b64 = Convert.ToBase64String(raw, i * ChunkBytes, n);
+                        byte[] buf = Encoding.UTF8.GetBytes(FilePacket(_book.pin, to, name, i, total, b64));
+                        ok = false;
+                        for (int attempt = 0; attempt < 6; attempt++)
+                        {
+                            lock (_ackLock)
+                            {
+                                _ackName = name;
+                                _ackFrom = to;
+                                _ackIndex = i;
+                                _ackHit.Reset();
+                            }
+                            if (!UdpSend(end, buf))
+                                break;
+                            if (_ackHit.WaitOne(400))
+                            {
+                                ok = true;
+                                break;
+                            }
+                        }
+                        if (!ok)
+                            Log("file failed " + name + " chunk " + i + " no ack " + end.Address + ":" + end.Port);
+                    }
+                    if (ok)
+                    {
+                        sent++;
+                        Log("file sent " + name + " to " + to);
                     }
                 }
             }
-            Log("file sent " + name + " bytes=" + raw.Length);
-            PostLine("Sent " + name + " to " + to);
+            if (sent == 0)
+                PostLine("No friend answered");
+            else if (sent == targets.Length)
+                PostLine(targets.Length == 1 ? "Sent " + name + " to " + targets[0] : "Sent " + name + " to all");
+            else
+                PostLine("Sent " + name + " to " + sent + " of " + targets.Length);
         }
 
         static void Hear()
@@ -921,7 +995,7 @@ namespace Mascot
                             bool hit = false;
                             lock (_ackLock)
                             {
-                                if (_book != null && AckMatches(raw, _book.pin, _ackName, _ackIndex))
+                                if (_book != null && AckMatches(raw, _book.pin, _ackName, _ackIndex) && AckFrom(raw, _ackFrom))
                                 {
                                     _ackHit.Set();
                                     hit = true;
@@ -965,6 +1039,7 @@ namespace Mascot
                             continue;
                         }
                         bool reply = false;
+                        bool arrived = false;
                         lock (_peers)
                         {
                             PeerHit hit;
@@ -976,6 +1051,7 @@ namespace Mascot
                                 Log("heard " + pin + " at " + whereIp);
                             bool stable = remote.Port == 8788;
                             bool first = hit.End == null || prevIp != whereIp;
+                            arrived = CameOnline(hit.End != null, hit.Seen, now);
                             hit.End = new IPEndPoint(remote.Address, remote.Port);
                             hit.Seen = now;
                             if (first || (stable && now - hit.Replied > 30000))
@@ -990,6 +1066,8 @@ namespace Mascot
                             UdpSend(remote, Encoding.UTF8.GetBytes("P\n" + _book.pin + "\n"));
                             Log("replied to " + remote.Address + ":" + remote.Port);
                         }
+                        if (arrived && _book != null && Listed(_book.friends, pin))
+                            PostLine(pin + " is here");
                     }
                     catch (Exception ex)
                     {
@@ -1027,6 +1105,53 @@ namespace Mascot
                 Log("udp send failed " + end + " " + ex.Message);
                 return false;
             }
+        }
+
+        static bool CameOnline(bool hadEnd, long seen, long now)
+        {
+            return !hadEnd || now - seen > TtlMs;
+        }
+
+        static bool Listed(string[] friends, string pin)
+        {
+            if (friends == null || string.IsNullOrEmpty(pin))
+                return false;
+            for (int i = 0; i < friends.Length; i++)
+            {
+                if (string.Equals(friends[i], pin, StringComparison.OrdinalIgnoreCase))
+                    return true;
+            }
+            return false;
+        }
+
+        static string[] SendTargets(string me, string one, string[] friends)
+        {
+            me = CleanPin(me);
+            one = CleanPin(one);
+            if (one.Length > 0 && one != me)
+                return new string[] { one };
+            List<string> list = new List<string>();
+            if (friends != null)
+            {
+                for (int i = 0; i < friends.Length; i++)
+                {
+                    string pin = CleanPin(friends[i]);
+                    if (pin.Length > 0 && pin != me)
+                        list.Add(pin);
+                }
+            }
+            return list.ToArray();
+        }
+
+        static bool AckFrom(string packet, string from)
+        {
+            from = CleanPin(from);
+            if (from.Length == 0)
+                return true;
+            if (string.IsNullOrEmpty(packet))
+                return false;
+            string[] parts = packet.Replace("\r", "").Split('\n');
+            return parts.Length >= 2 && CleanPin(parts[1]) == from;
         }
 
         static IPEndPoint PeerEnd(string pin)
@@ -1483,8 +1608,7 @@ namespace Mascot
             book.pin = CleanPin(book.pin);
             book.relay = book.relay.Trim().TrimEnd('/');
             book.friends = Normalize(book.friends, book.friend);
-            if (CleanPin(book.friend).Length == 0 && book.friends.Length > 0)
-                book.friend = book.friends[0];
+            book.friend = CleanPin(book.friend);
             return book;
         }
 
@@ -1584,9 +1708,11 @@ namespace Mascot
 
         static string TargetLine()
         {
-            if (CleanPin(_book.friend).Length == 0)
+            if (_book.friends == null || _book.friends.Length == 0)
                 return "Add a friend. Ctrl+M sends.";
-            return "Files go to " + _book.friend + ". Ctrl+M sends.";
+            if (CleanPin(_book.friend).Length == 0)
+                return "Sends to all friends. Pick one to narrow.";
+            return "Sends only to " + _book.friend + ".";
         }
 
         static void Save(FriendBook book)
